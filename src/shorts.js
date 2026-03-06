@@ -4,9 +4,10 @@ import { configRead } from './config';
 
 const SHELF_SHORTS = 'TVHTML5_SHELF_RENDERER_TYPE_SHORTS';
 
-const origParse = JSON.parse;
+// Wrap the existing JSON.parse (which may be adblock's hook)
+const existingParse = JSON.parse;
 JSON.parse = function () {
-  const r = origParse.apply(this, arguments);
+  const r = existingParse.apply(this, arguments);
   if (!configRead('removeShorts')) {
     return r;
   }
