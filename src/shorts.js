@@ -70,6 +70,97 @@ JSON.parse = function () {
   return r;
 };
 
+// Hook fetch to catch dynamically loaded content (YouTube loads Shorts via AJAX after page load)
+const existingFetch = fetch;
+fetch = async function (...args) {
+  const response = await existingFetch.apply(this, args);
+
+  // Only process YouTube API responses
+  const url = args[0];
+  if (
+    typeof url === 'string' &&
+    (url.includes('/youtubei/v1/') ||
+      url.includes('browse') ||
+      url.includes('search') ||
+      url.includes('next')) &&
+    configRead('removeShorts')
+  ) {
+    // Clone the response so we can read it without consuming the original
+    const clonedResponse = response.clone();
+
+    // Process asynchronously to avoid blocking
+    (async () => {
+      try {
+        const text = await clonedResponse.text();
+        if (text) {
+          const data = existingParse(text);
+
+          // Process the same way as JSON.parse hook
+          findAllAndProcess(data, 'gridRenderer', (renderer) => {
+            if (renderer?.items) {
+              renderer.items = renderer.items.filter(
+                (elm) =>
+                  elm?.tileRenderer?.onSelectCommand?.reelWatchEndpoint == null
+              );
+            }
+          });
+
+          findAllAndProcess(data, 'gridContinuation', (renderer) => {
+            if (renderer?.items) {
+              renderer.items = renderer.items.filter(
+                (elm) =>
+                  elm?.tileRenderer?.onSelectCommand?.reelWatchEndpoint == null
+              );
+            }
+          });
+
+          findAllAndProcess(data, 'sectionListRenderer', (renderer) => {
+            if (renderer?.contents) {
+              renderer.contents = renderer.contents.filter(
+                (elm) =>
+                  elm?.shelfRenderer?.tvhtml5ShelfRendererType != SHELF_SHORTS
+              );
+
+              renderer.contents.forEach((content) => {
+                if (
+                  content?.shelfRenderer?.content?.horizontalListRenderer?.items
+                ) {
+                  content.shelfRenderer.content.horizontalListRenderer.items =
+                    content.shelfRenderer.content.horizontalListRenderer.items.filter(
+                      (elm) =>
+                        elm?.tileRenderer?.onSelectCommand?.reelWatchEndpoint ==
+                        null
+                    );
+                }
+              });
+            }
+          });
+
+          findAllAndProcess(data, 'richGridRenderer', (renderer) => {
+            if (renderer?.contents) {
+              renderer.contents = renderer.contents.filter(
+                (elm) => !elm?.tileRenderer?.onSelectCommand?.reelWatchEndpoint
+              );
+            }
+          });
+
+          if (Array.isArray(data.entries)) {
+            data.entries = data.entries.filter(
+              (elm) => elm?.command?.reelWatchEndpoint == null
+            );
+          }
+        }
+      } catch (e) {
+        // Silently fail - don't break the app if processing fails
+        console.warn('Failed to process fetch response:', e);
+      }
+    })();
+  }
+
+  // Return the original response immediately (non-blocking)
+  return response;
+};
+
 /**
  * Find ALL objects with matching key and process them
  * @param {Object} obj - Root object to search
